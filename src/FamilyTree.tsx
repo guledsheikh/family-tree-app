@@ -1,6 +1,7 @@
 // src/FamilyTree.tsx
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import * as d3 from "d3";
+import { createClient } from "@supabase/supabase-js";
 
 // ----- Types -----
 export interface Person {
@@ -9,6 +10,23 @@ export interface Person {
   children?: Person[];
   _collapsed?: boolean;
 }
+
+// Supabase types
+interface SupabasePerson {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  children: string[];
+  collapsed: boolean;
+}
+
+// ----- Supabase Setup -----
+// Use these environment variable names in Vercel:
+// SUPABASE_URL and SUPABASE_ANON_KEY
+const SUPABASE_URL = process.env.SUPABASE_URL || "your-supabase-url";
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "your-supabase-key";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ----- Sample Data with Ancestors -----
 const initialData: Person = {
@@ -94,6 +112,62 @@ const getPathToNode = (node: Person, id: string): Person[] => {
   return [];
 };
 
+// Convert tree structure to flat array for Supabase
+const flattenTree = (
+  node: Person,
+  parentId: string | null = null
+): SupabasePerson[] => {
+  const flattened: SupabasePerson[] = [
+    {
+      id: node.id,
+      name: node.name,
+      parent_id: parentId,
+      children: node.children ? node.children.map((child) => child.id) : [],
+      collapsed: node._collapsed || false,
+    },
+  ];
+
+  if (node.children) {
+    for (const child of node.children) {
+      flattened.push(...flattenTree(child, node.id));
+    }
+  }
+
+  return flattened;
+};
+
+// Convert flat array back to tree structure
+const buildTree = (flatData: SupabasePerson[]): Person | null => {
+  if (flatData.length === 0) return null;
+
+  // Create a map for quick lookup
+  const nodeMap = new Map<string, Person>();
+
+  // First pass: create all nodes without children
+  flatData.forEach((item) => {
+    nodeMap.set(item.id, {
+      id: item.id,
+      name: item.name,
+      _collapsed: item.collapsed,
+      children: [],
+    });
+  });
+
+  // Second pass: build the hierarchy
+  flatData.forEach((item) => {
+    const node = nodeMap.get(item.id);
+    if (node && item.children) {
+      node.children = item.children
+        .map((childId) => nodeMap.get(childId))
+        .filter((child): child is Person => child !== undefined);
+    }
+  });
+
+  // Find the root (node with no parent)
+  const rootItem = flatData.find((item) => item.parent_id === null);
+  return rootItem ? nodeMap.get(rootItem.id) || null : null;
+};
+
 // ----- Component -----
 const FamilyTree: React.FC = () => {
   const [data, setData] = useState<Person>(initialData);
@@ -104,9 +178,82 @@ const FamilyTree: React.FC = () => {
   } | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [viewRootId, setViewRootId] = useState<string>("3"); // Start at grandparent level
+  const [loading, setLoading] = useState<boolean>(true);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const contextMenuRef = useRef<HTMLUListElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  // Load data from Supabase on component mount
+  useEffect(() => {
+    loadDataFromSupabase();
+  }, []);
+
+  // Save data to Supabase whenever it changes
+  useEffect(() => {
+    if (!loading) {
+      saveDataToSupabase();
+    }
+  }, [data, loading]);
+
+  // Load data from Supabase
+  const loadDataFromSupabase = async () => {
+    try {
+      setLoading(true);
+      const { data: supabaseData, error } = await supabase
+        .from("family_tree")
+        .select("*")
+        .order("id");
+
+      if (error) {
+        console.error("Error loading data from Supabase:", error);
+        // If no data exists, initialize with sample data
+        await initializeSupabaseData();
+        return;
+      }
+
+      if (supabaseData && supabaseData.length > 0) {
+        const treeData = buildTree(supabaseData);
+        if (treeData) {
+          setData(treeData);
+        }
+      } else {
+        // If no data exists, initialize with sample data
+        await initializeSupabaseData();
+      }
+    } catch (error) {
+      console.error("Error loading data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initialize Supabase with sample data
+  const initializeSupabaseData = async () => {
+    try {
+      const flatData = flattenTree(initialData);
+      const { error } = await supabase.from("family_tree").upsert(flatData);
+
+      if (error) {
+        console.error("Error initializing Supabase data:", error);
+      }
+    } catch (error) {
+      console.error("Error initializing data:", error);
+    }
+  };
+
+  // Save data to Supabase
+  const saveDataToSupabase = async () => {
+    try {
+      const flatData = flattenTree(data);
+      const { error } = await supabase.from("family_tree").upsert(flatData);
+
+      if (error) {
+        console.error("Error saving data to Supabase:", error);
+      }
+    } catch (error) {
+      console.error("Error saving data:", error);
+    }
+  };
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -140,7 +287,7 @@ const FamilyTree: React.FC = () => {
     );
   }, []);
 
-  const addChild = useCallback((id: string) => {
+  const addChild = useCallback(async (id: string) => {
     const name = prompt("Enter child's name:");
     if (!name) return;
     const child: Person = { id: genId(), name, _collapsed: false };
@@ -211,8 +358,23 @@ const FamilyTree: React.FC = () => {
       .call(zoomRef.current.transform, d3.zoomIdentity);
   }, []);
 
+  // Reset tree to initial data
+  const resetTree = async () => {
+    if (
+      window.confirm(
+        "Are you sure you want to reset the tree? This will restore the original sample data."
+      )
+    ) {
+      await initializeSupabaseData();
+      setData(initialData);
+      setViewRootId("3");
+    }
+  };
+
   // D3 render
   useEffect(() => {
+    if (loading) return;
+
     const el = svgRef.current;
     if (!el) return;
 
@@ -438,7 +600,32 @@ const FamilyTree: React.FC = () => {
         .style("font-weight", "600")
         .text("Show Parent ↑");
     }
-  }, [data, viewRoot, selectedNode, toggleCollapse, viewRootId, setViewToNode]);
+  }, [
+    data,
+    viewRoot,
+    selectedNode,
+    toggleCollapse,
+    viewRootId,
+    setViewToNode,
+    loading,
+  ]);
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          width: "100vw",
+          height: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          background: "#f8fafc",
+        }}
+      >
+        <div>Loading family tree...</div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -514,6 +701,23 @@ const FamilyTree: React.FC = () => {
             Show Full Tree
           </button>
         )}
+
+        <button
+          onClick={resetTree}
+          style={{
+            padding: "8px 12px",
+            background: "#ff9800",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontFamily: "system-ui",
+            fontSize: "14px",
+            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+          }}
+        >
+          Reset Tree Data
+        </button>
       </div>
 
       {/* Breadcrumb navigation */}

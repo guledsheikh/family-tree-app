@@ -1,7 +1,8 @@
 // src/FamilyTree.tsx
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import * as d3 from "d3";
-import { createClient } from "@supabase/supabase-js";
+//import { createClient } from "@supabase/supabase-js";
+import { supabase } from "./supabaseClient";
 
 // ----- Types -----
 export interface Person {
@@ -23,10 +24,10 @@ interface SupabasePerson {
 // ----- Supabase Setup -----
 // Use these environment variable names in Vercel:
 // SUPABASE_URL and SUPABASE_ANON_KEY
-const SUPABASE_URL = process.env.SUPABASE_URL || "your-supabase-url";
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "your-supabase-key";
+// const SUPABASE_URL = process.env.SUPABASE_URL || "your-supabase-url";
+// const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "your-supabase-key";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ----- Sample Data with Ancestors -----
 const initialData: Person = {
@@ -183,20 +184,8 @@ const FamilyTree: React.FC = () => {
   const contextMenuRef = useRef<HTMLUListElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
-  // Load data from Supabase on component mount
-  useEffect(() => {
-    loadDataFromSupabase();
-  }, []);
-
-  // Save data to Supabase whenever it changes
-  useEffect(() => {
-    if (!loading) {
-      saveDataToSupabase();
-    }
-  }, [data, loading]);
-
   // Load data from Supabase
-  const loadDataFromSupabase = async () => {
+  const loadDataFromSupabase = useCallback(async () => {
     try {
       setLoading(true);
       const { data: supabaseData, error } = await supabase
@@ -225,10 +214,10 @@ const FamilyTree: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Initialize Supabase with sample data
-  const initializeSupabaseData = async () => {
+  const initializeSupabaseData = useCallback(async () => {
     try {
       const flatData = flattenTree(initialData);
       const { error } = await supabase.from("family_tree").upsert(flatData);
@@ -239,10 +228,10 @@ const FamilyTree: React.FC = () => {
     } catch (error) {
       console.error("Error initializing data:", error);
     }
-  };
+  }, []);
 
   // Save data to Supabase
-  const saveDataToSupabase = async () => {
+  const saveDataToSupabase = useCallback(async () => {
     try {
       const flatData = flattenTree(data);
       const { error } = await supabase.from("family_tree").upsert(flatData);
@@ -253,7 +242,19 @@ const FamilyTree: React.FC = () => {
     } catch (error) {
       console.error("Error saving data:", error);
     }
-  };
+  }, [data]);
+
+  // Load data from Supabase on component mount
+  useEffect(() => {
+    loadDataFromSupabase();
+  }, [loadDataFromSupabase]);
+
+  // Save data to Supabase whenever it changes
+  useEffect(() => {
+    if (!loading) {
+      saveDataToSupabase();
+    }
+  }, [data, loading, saveDataToSupabase]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -359,7 +360,7 @@ const FamilyTree: React.FC = () => {
   }, []);
 
   // Reset tree to initial data
-  const resetTree = async () => {
+  const resetTree = useCallback(async () => {
     if (
       window.confirm(
         "Are you sure you want to reset the tree? This will restore the original sample data."
@@ -369,7 +370,7 @@ const FamilyTree: React.FC = () => {
       setData(initialData);
       setViewRootId("3");
     }
-  };
+  }, [initializeSupabaseData]);
 
   // D3 render
   useEffect(() => {
@@ -408,11 +409,11 @@ const FamilyTree: React.FC = () => {
 
     const g = svgSel.append("g").attr("transform", `translate(${tx},${ty})`);
 
-    // Zoom & Pan
+    // Zoom & Pan - Fixed the event parameter warning
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.4, 2.5])
-      .on("zoom", (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+      .on("zoom", (event) => {
         g.attr("transform", event.transform.toString());
       });
 

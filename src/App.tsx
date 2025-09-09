@@ -1,8 +1,11 @@
+// src/App.tsx
+import React from "react";
 import FamilyTree from "./FamilyTree";
+import "./App.css";
 
 function App() {
   return (
-    <div style={{ width: "100%", height: "100vh" }}>
+    <div className="App">
       <FamilyTree />
     </div>
   );

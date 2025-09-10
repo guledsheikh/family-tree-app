@@ -1,7 +1,6 @@
 // src/FamilyTree.tsx
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import * as d3 from "d3";
-//import { createClient } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
 
 // ----- Types -----
@@ -21,13 +20,62 @@ interface SupabasePerson {
   collapsed: boolean;
 }
 
-// ----- Supabase Setup -----
-// Use these environment variable names in Vercel:
-// SUPABASE_URL and SUPABASE_ANON_KEY
-// const SUPABASE_URL = process.env.SUPABASE_URL || "your-supabase-url";
-// const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "your-supabase-key";
+// ----- Debug Component -----
+interface DebugInfoProps {
+  supabaseUrl: string;
+  supabaseKey: string;
+  environment: string;
+  supabaseStatus: string;
+  error: string | null;
+}
 
-// const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const DebugInfo: React.FC<DebugInfoProps> = ({
+  supabaseUrl,
+  supabaseKey,
+  environment,
+  supabaseStatus,
+  error,
+}) => {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: "10px",
+        right: "10px",
+        background: "rgba(0,0,0,0.8)",
+        color: "white",
+        padding: "10px",
+        fontSize: "12px",
+        zIndex: 9999,
+        maxWidth: "300px",
+        borderRadius: "5px",
+        fontFamily: "monospace",
+      }}
+    >
+      <h4 style={{ margin: "0 0 10px 0" }}>Debug Information</h4>
+      <p>Environment: {environment}</p>
+      <p>
+        Supabase Status:{" "}
+        <span
+          style={{
+            color:
+              supabaseStatus === "connected"
+                ? "#4caf50"
+                : supabaseStatus === "error"
+                ? "#e74c3c"
+                : "#f39c12",
+          }}
+        >
+          {supabaseStatus}
+        </span>
+      </p>
+      <p>Supabase URL: {supabaseUrl ? "Set" : "Not set"}</p>
+      <p>Supabase Key: {supabaseKey ? "Set" : "Not set"}</p>
+      {error && <p style={{ color: "#e74c3c" }}>Error: {error}</p>}
+      <p>Build Date: {new Date().toISOString()}</p>
+    </div>
+  );
+};
 
 // ----- Sample Data with Ancestors -----
 const initialData: Person = {
@@ -180,14 +228,47 @@ const FamilyTree: React.FC = () => {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [viewRootId, setViewRootId] = useState<string>("3"); // Start at grandparent level
   const [loading, setLoading] = useState<boolean>(true);
+  const [supabaseStatus, setSupabaseStatus] = useState<
+    "checking" | "connected" | "error"
+  >("checking");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [showDebug, setShowDebug] = useState(false);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const contextMenuRef = useRef<HTMLUListElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  // Debug keyboard shortcut
+  useEffect(() => {
+    const handleKeyPress = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key === "d") {
+        setShowDebug((prev) => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyPress);
+    return () => window.removeEventListener("keydown", handleKeyPress);
+  }, []);
 
   // Load data from Supabase
   const loadDataFromSupabase = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError(null);
+      setSupabaseStatus("checking");
+
+      // Test Supabase connection - remove the unused variable
+      const { error: testError } = await supabase
+        .from("family_tree")
+        .select("count")
+        .limit(1);
+
+      if (testError) {
+        throw new Error(`Supabase connection error: ${testError.message}`);
+      }
+
+      setSupabaseStatus("connected");
+
+      // Load actual data
       const { data: supabaseData, error } = await supabase
         .from("family_tree")
         .select("*")
@@ -211,6 +292,10 @@ const FamilyTree: React.FC = () => {
       }
     } catch (error) {
       console.error("Error loading data:", error);
+      setSupabaseStatus("error");
+      setLoadError(
+        error instanceof Error ? error.message : "Unknown error occurred"
+      );
     } finally {
       setLoading(false);
     }
@@ -224,11 +309,18 @@ const FamilyTree: React.FC = () => {
 
       if (error) {
         console.error("Error initializing Supabase data:", error);
+        throw error;
       }
+
+      // Reload data after initialization
+      await loadDataFromSupabase();
     } catch (error) {
       console.error("Error initializing data:", error);
+      setLoadError(
+        error instanceof Error ? error.message : "Unknown error occurred"
+      );
     }
-  }, []);
+  }, [loadDataFromSupabase]);
 
   // Save data to Supabase
   const saveDataToSupabase = useCallback(async () => {
@@ -251,10 +343,10 @@ const FamilyTree: React.FC = () => {
 
   // Save data to Supabase whenever it changes
   useEffect(() => {
-    if (!loading) {
+    if (!loading && supabaseStatus === "connected") {
       saveDataToSupabase();
     }
-  }, [data, loading, saveDataToSupabase]);
+  }, [data, loading, saveDataToSupabase, supabaseStatus]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -367,8 +459,6 @@ const FamilyTree: React.FC = () => {
       )
     ) {
       await initializeSupabaseData();
-      setData(initialData);
-      setViewRootId("3");
     }
   }, [initializeSupabaseData]);
 
@@ -409,7 +499,7 @@ const FamilyTree: React.FC = () => {
 
     const g = svgSel.append("g").attr("transform", `translate(${tx},${ty})`);
 
-    // Zoom & Pan - Fixed the event parameter warning
+    // Zoom & Pan
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.4, 2.5])
@@ -621,9 +711,54 @@ const FamilyTree: React.FC = () => {
           justifyContent: "center",
           alignItems: "center",
           background: "#f8fafc",
+          flexDirection: "column",
         }}
       >
-        <div>Loading family tree...</div>
+        <div className="loading-spinner"></div>
+        <p style={{ marginTop: "20px" }}>Loading family tree...</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div
+        style={{
+          width: "100vw",
+          height: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          background: "#f8fafc",
+          flexDirection: "column",
+          padding: "20px",
+        }}
+      >
+        <h2 style={{ color: "#e74c3c", marginBottom: "20px" }}>
+          Error Loading Family Tree
+        </h2>
+        <p
+          style={{
+            color: "#7f8c8d",
+            marginBottom: "30px",
+            textAlign: "center",
+          }}
+        >
+          {loadError}
+        </p>
+        <button
+          onClick={loadDataFromSupabase}
+          style={{
+            padding: "10px 20px",
+            background: "#3498db",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -881,6 +1016,17 @@ const FamilyTree: React.FC = () => {
             ❌ Cancel
           </li>
         </ul>
+      )}
+
+      {/* Debug information */}
+      {showDebug && (
+        <DebugInfo
+          supabaseUrl={import.meta.env.VITE_SUPABASE_URL || ""}
+          supabaseKey={import.meta.env.VITE_SUPABASE_ANON_KEY || ""}
+          environment={import.meta.env.MODE}
+          supabaseStatus={supabaseStatus}
+          error={loadError}
+        />
       )}
     </div>
   );

@@ -381,8 +381,10 @@ const FamilyTree: React.FC = () => {
     if (
       supabaseUrl &&
       supabaseKey &&
-      !supabaseUrl.includes("your_supabase_project_url_here") &&
-      !supabaseKey.includes("your_supabase_anon_key_here")
+      !supabaseUrl.includes("https://cryyxpbbbvvvnzzrkqkq.supabase.co") &&
+      !supabaseKey.includes(
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyeXl4cGJiYnZ2dm56enJrcWtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcyOTA1MDcsImV4cCI6MjA3Mjg2NjUwN30.4dxhGNr_XWxANvsDULcQSs0H36uehzgbTOP-WvHetOU"
+      )
     ) {
       loadDataFromSupabase();
     } else {

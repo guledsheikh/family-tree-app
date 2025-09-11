@@ -249,6 +249,41 @@ const FamilyTree: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyPress);
   }, []);
 
+  // Check if Supabase is properly configured
+  useEffect(() => {
+    const checkSupabaseConfig = () => {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+      if (!supabaseUrl || !supabaseKey) {
+        setSupabaseStatus("error");
+        setLoadError(
+          "Supabase environment variables are not configured. Please check your .env file and Vercel settings."
+        );
+        setLoading(false);
+        return false;
+      }
+
+      if (
+        supabaseUrl.includes("your_supabase_project_url_here") ||
+        supabaseKey.includes("your_supabase_anon_key_here")
+      ) {
+        setSupabaseStatus("error");
+        setLoadError(
+          "Supabase environment variables are using placeholder values. Please update them with your actual Supabase credentials."
+        );
+        setLoading(false);
+        return false;
+      }
+
+      return true;
+    };
+
+    if (!checkSupabaseConfig()) {
+      return;
+    }
+  }, []);
+
   // Load data from Supabase
   const loadDataFromSupabase = useCallback(async () => {
     try {
@@ -256,7 +291,7 @@ const FamilyTree: React.FC = () => {
       setLoadError(null);
       setSupabaseStatus("checking");
 
-      // Test Supabase connection - remove the unused variable
+      // Test Supabase connection
       const { error: testError } = await supabase
         .from("family_tree")
         .select("count")
@@ -282,6 +317,7 @@ const FamilyTree: React.FC = () => {
       }
 
       if (supabaseData && supabaseData.length > 0) {
+        console.log("Supabase raw data:", supabaseData);
         const treeData = buildTree(supabaseData);
         if (treeData) {
           setData(treeData);
@@ -338,7 +374,20 @@ const FamilyTree: React.FC = () => {
 
   // Load data from Supabase on component mount
   useEffect(() => {
-    loadDataFromSupabase();
+    // Only load data if Supabase is properly configured
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    if (
+      supabaseUrl &&
+      supabaseKey &&
+      !supabaseUrl.includes("your_supabase_project_url_here") &&
+      !supabaseKey.includes("your_supabase_anon_key_here")
+    ) {
+      loadDataFromSupabase();
+    } else {
+      setLoading(false);
+    }
   }, [loadDataFromSupabase]);
 
   // Save data to Supabase whenever it changes

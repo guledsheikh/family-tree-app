@@ -4,12 +4,19 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js'
 const supabaseUrl: string | undefined = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey: string | undefined = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-// Validate environment variables
+// // Validate environment variables
+// if (!supabaseUrl || !supabaseAnonKey) {
+//   throw new Error(
+//     'Supabase environment variables are not set. ' +
+//     'Please make sure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are defined in your .env file and in Vercel Project Settings → Environment Variables.'
+//   )
+// }
+
+// Safety check
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(
-    'Supabase environment variables are not set. ' +
-    'Please make sure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are defined in your .env file and in Vercel Project Settings → Environment Variables.'
-  )
+    'Supabase environment variables are not set. Make sure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are defined in your .env file and in Vercel Project Settings → Environment Variables.'
+  );
 }
 
 // Create and export the Supabase client

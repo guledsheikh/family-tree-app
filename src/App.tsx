@@ -1,5 +1,5 @@
 // src/App.tsx
-import React from "react";
+//import React from "react";
 import FamilyTree from "./FamilyTree";
 import "./App.css";
 

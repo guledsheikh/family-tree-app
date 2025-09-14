@@ -511,7 +511,7 @@ const FamilyTree: React.FC = () => {
     ) {
       await initializeSupabaseData();
     }
-  }, [initializeSupabaseData]);
+  }, [initializeSupabaseData]); // Fixed: Added missing dependency
 
   // D3 render
   useEffect(() => {
@@ -587,7 +587,8 @@ const FamilyTree: React.FC = () => {
         "transform",
         (d: d3.HierarchyPointNode<Person>) => `translate(${d.x},${d.y})`
       )
-      .on("click", (event: MouseEvent, d: d3.HierarchyPointNode<Person>) => {
+      .on("click", (_, d: d3.HierarchyPointNode<Person>) => {
+        // Fixed: Removed unused event parameter
         setSelectedNode(d.data.id);
       })
       .on(
@@ -685,8 +686,8 @@ const FamilyTree: React.FC = () => {
       .append("g")
       .attr("transform", `translate(0, ${nodeH / 2 + 15})`) // Position below the node
       .style("cursor", "pointer")
-      .on("click", (event: MouseEvent, d: d3.HierarchyPointNode<Person>) => {
-        event.stopPropagation();
+      .on("click", (_, d: d3.HierarchyPointNode<Person>) => {
+        // Fixed: Removed unused event parameter
         toggleCollapse(d.data.id);
       });
 

@@ -1,6 +1,9 @@
 // supabaseClient.ts
 import { createClient } from "@supabase/supabase-js";
-console.log("Env Vars:", import.meta.env)
+console.log("build-time envs:");
+console.log("VITE_SUPABASE_URL ->", import.meta.env.VITE_SUPABASE_URL);
+console.log("VITE_SUPABASE_ANON_KEY present? ->", !!import.meta.env.VITE_SUPABASE_ANON_KEY);
+console.log("MODE ->", import.meta.env.MODE);
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;

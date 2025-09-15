@@ -4,10 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-console.log("Loaded env vars:", {
-  url: import.meta.env.VITE_SUPABASE_URL,
-  key: import.meta.env.VITE_SUPABASE_ANON_KEY ? "Anon key is set" : "Missing"
-});
+console.log("URL:", supabaseUrl)
+console.log("KEY:", supabaseAnonKey ? "Anon key is set" : "Missing key")
 
 // ✅ Debug check (safe for browser logs)
 if (!supabaseUrl || !supabaseAnonKey) {

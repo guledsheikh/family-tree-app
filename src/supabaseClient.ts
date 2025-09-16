@@ -4,12 +4,6 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-console.log("SUPABASE URL:", JSON.stringify(import.meta.env.VITE_SUPABASE_URL));
-console.log("SUPABASE KEY:", JSON.stringify(import.meta.env.VITE_SUPABASE_ANON_KEY));
-
-console.log("SUPABASE URL:", JSON.stringify(import.meta.env.VITE_SUPABASE_URL));
-console.log("SUPABASE KEY:", JSON.stringify(import.meta.env.VITE_SUPABASE_ANON_KEY));
-
 // ✅ Debug check (safe for browser logs)
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error("❌ Supabase env vars are missing!");

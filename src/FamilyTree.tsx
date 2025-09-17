@@ -435,11 +435,29 @@ const FamilyTree: React.FC = () => {
     const name = prompt("Enter child's name:");
     if (!name) return;
     const child: Person = { id: genId(), name, _collapsed: false };
+
     setData((prev) =>
       mapTree(prev, (n) =>
         n.id === id ? { ...n, children: [...(n.children ?? []), child] } : n
       )
     );
+
+    // Save directly to Supabase
+    try {
+      const { error } = await supabase.from("family_tree").insert([
+        {
+          id: child.id,
+          name: child.name,
+          parent_id: id,
+          children: [],
+          collapsed: false,
+        },
+      ]);
+      if (error) console.error("Error saving new child:", error);
+    } catch (err) {
+      console.error("Unexpected error saving child:", err);
+    }
+
     setMenu(null);
   }, []);
 

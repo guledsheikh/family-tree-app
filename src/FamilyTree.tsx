@@ -236,6 +236,8 @@ const FamilyTree: React.FC = () => {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const contextMenuRef = useRef<HTMLUListElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  //const saveTimeoutRef = useRef<NodeJS.Timeout>();
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Debug keyboard shortcut
   useEffect(() => {
@@ -366,9 +368,12 @@ const FamilyTree: React.FC = () => {
 
       if (error) {
         console.error("Error saving data to Supabase:", error);
+        return false;
       }
+      return true;
     } catch (error) {
       console.error("Error saving data:", error);
+      return false;
     }
   }, [data]);
 
@@ -392,11 +397,26 @@ const FamilyTree: React.FC = () => {
     }
   }, [loadDataFromSupabase]);
 
-  // Save data to Supabase whenever it changes
+  // Save data to Supabase with debounce
   useEffect(() => {
     if (!loading && supabaseStatus === "connected") {
-      saveDataToSupabase();
+      // Clear any existing timeout
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+
+      // Set a new timeout to save after 1 second of inactivity
+      saveTimeoutRef.current = setTimeout(() => {
+        saveDataToSupabase();
+      }, 1000);
     }
+
+    // Cleanup function
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
   }, [data, loading, saveDataToSupabase, supabaseStatus]);
 
   // Close menu when clicking outside
@@ -431,79 +451,165 @@ const FamilyTree: React.FC = () => {
     );
   }, []);
 
-  const addChild = useCallback(async (id: string) => {
-    const name = prompt("Enter child's name:");
-    if (!name) return;
-    const child: Person = { id: genId(), name, _collapsed: false };
+  const addChild = useCallback(
+    async (id: string) => {
+      const name = prompt("Enter child's name:");
+      if (!name) return;
 
-    setData((prev) =>
-      mapTree(prev, (n) =>
+      const child: Person = { id: genId(), name, _collapsed: false };
+
+      // Create updated data first
+      const updatedData = mapTree(data, (n) =>
         n.id === id ? { ...n, children: [...(n.children ?? []), child] } : n
-      )
-    );
+      );
 
-    // Save directly to Supabase
-    try {
-      const { error } = await supabase.from("family_tree").insert([
-        {
-          id: child.id,
-          name: child.name,
-          parent_id: id,
-          children: [],
-          collapsed: false,
-        },
-      ]);
-      if (error) console.error("Error saving new child:", error);
-    } catch (err) {
-      console.error("Unexpected error saving child:", err);
-    }
+      // Update state immediately for UI responsiveness
+      setData(updatedData);
 
-    setMenu(null);
-  }, []);
+      try {
+        // Convert to flat structure and save to Supabase
+        const flatData = flattenTree(updatedData);
+        const { error } = await supabase.from("family_tree").upsert(flatData);
 
-  const editNode = useCallback((id: string) => {
-    const name = prompt("Enter new name:");
-    if (!name) return;
-    setData((prev) => mapTree(prev, (n) => (n.id === id ? { ...n, name } : n)));
-    setMenu(null);
-  }, []);
+        if (error) {
+          console.error("Error saving child to Supabase:", error);
+          // Revert UI if there's an error
+          setData((prev) => prev); // This will force a re-render with the previous data
+          alert("Error saving child. Please try again.");
+        }
+      } catch (error) {
+        console.error("Error saving data:", error);
+        // Revert UI if there's an error
+        setData((prev) => prev);
+        alert("Error saving child. Please try again.");
+      }
+
+      setMenu(null);
+    },
+    [data]
+  );
+
+  const editNode = useCallback(
+    async (id: string) => {
+      const name = prompt("Enter new name:");
+      if (!name) return;
+
+      // Create updated data first
+      const updatedData = mapTree(data, (n) =>
+        n.id === id ? { ...n, name } : n
+      );
+
+      // Update state immediately for UI responsiveness
+      setData(updatedData);
+
+      try {
+        // Convert to flat structure and save to Supabase
+        const flatData = flattenTree(updatedData);
+        const { error } = await supabase.from("family_tree").upsert(flatData);
+
+        if (error) {
+          console.error("Error saving edited node to Supabase:", error);
+          // Revert UI if there's an error
+          setData((prev) => prev);
+          alert("Error saving changes. Please try again.");
+        }
+      } catch (error) {
+        console.error("Error saving data:", error);
+        // Revert UI if there's an error
+        setData((prev) => prev);
+        alert("Error saving changes. Please try again.");
+      }
+
+      setMenu(null);
+    },
+    [data]
+  );
 
   const deleteNode = useCallback(
-    (id: string) => {
+    async (id: string) => {
       if (data.id === id) {
         alert("Cannot delete the root node.");
         return;
       }
+
+      // Store the current data for potential revert
+      const previousData = data;
+
+      // Update state immediately for UI responsiveness
       setData((prev) => {
         const next = updateTree(prev, (n) => (n.id === id ? null : n));
         return next ?? prev;
       });
-      setMenu(null);
-    },
-    [data.id]
-  );
 
-  const addParentAbove = useCallback((id: string) => {
-    const name = prompt("Enter parent's name:");
-    if (!name) return;
+      try {
+        // Convert to flat structure and save to Supabase
+        const flatData = flattenTree(data);
+        const { error } = await supabase.from("family_tree").upsert(flatData);
 
-    setData((prev) => {
-      // If we're adding above the root
-      if (prev.id === id) {
-        return { id: genId(), name, children: [prev] };
+        if (error) {
+          console.error("Error deleting node from Supabase:", error);
+          // Revert UI if there's an error
+          setData(previousData);
+          alert("Error deleting node. Please try again.");
+        }
+      } catch (error) {
+        console.error("Error saving data:", error);
+        // Revert UI if there's an error
+        setData(previousData);
+        alert("Error deleting node. Please try again.");
       }
 
-      // If we're adding above a non-root node
-      return mapTree(prev, (n) => {
-        if (n.id === id) {
-          return { id: genId(), name, children: [n] };
-        }
-        return n;
-      });
-    });
+      setMenu(null);
+    },
+    [data, data.id]
+  );
 
-    setMenu(null);
-  }, []);
+  const addParentAbove = useCallback(
+    async (id: string) => {
+      const name = prompt("Enter parent's name:");
+      if (!name) return;
+
+      // Store the current data for potential revert
+      const previousData = data;
+
+      // Update state immediately for UI responsiveness
+      setData((prev) => {
+        // If we're adding above the root
+        if (prev.id === id) {
+          return { id: genId(), name, children: [prev] };
+        }
+
+        // If we're adding above a non-root node
+        return mapTree(prev, (n) => {
+          if (n.id === id) {
+            return { id: genId(), name, children: [n] };
+          }
+          return n;
+        });
+      });
+
+      try {
+        // Convert to flat structure and save to Supabase
+        const flatData = flattenTree(data);
+        const { error } = await supabase.from("family_tree").upsert(flatData);
+
+        if (error) {
+          console.error("Error saving new parent to Supabase:", error);
+          // Revert UI if there's an error
+          setData(previousData);
+          alert("Error adding parent. Please try again.");
+        }
+      } catch (error) {
+        console.error("Error saving data:", error);
+        // Revert UI if there's an error
+        setData(previousData);
+        alert("Error adding parent. Please try again.");
+      }
+
+      setMenu(null);
+    },
+    [data]
+  );
 
   const setViewToNode = useCallback((id: string) => {
     setViewRootId(id);
@@ -529,7 +635,7 @@ const FamilyTree: React.FC = () => {
     ) {
       await initializeSupabaseData();
     }
-  }, [initializeSupabaseData]); // Fixed: Added missing dependency
+  }, [initializeSupabaseData]);
 
   // D3 render
   useEffect(() => {
@@ -606,7 +712,6 @@ const FamilyTree: React.FC = () => {
         (d: d3.HierarchyPointNode<Person>) => `translate(${d.x},${d.y})`
       )
       .on("click", (_, d: d3.HierarchyPointNode<Person>) => {
-        // Fixed: Removed unused event parameter
         setSelectedNode(d.data.id);
       })
       .on(
@@ -705,7 +810,6 @@ const FamilyTree: React.FC = () => {
       .attr("transform", `translate(0, ${nodeH / 2 + 15})`) // Position below the node
       .style("cursor", "pointer")
       .on("click", (_, d: d3.HierarchyPointNode<Person>) => {
-        // Fixed: Removed unused event parameter
         toggleCollapse(d.data.id);
       });
 

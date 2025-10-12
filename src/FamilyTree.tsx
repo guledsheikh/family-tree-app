@@ -217,6 +217,38 @@ const buildTree = (flatData: SupabasePerson[]): Person | null => {
   return rootItem ? nodeMap.get(rootItem.id) || null : null;
 };
 
+// // delete recursively (delete parent, deletes everything under it)
+// const deleteNodeAndChildren = async (nodeId: string) => {
+//   // First get the node to find its children
+//   const { data: node, error: nodeError } = await supabase
+//     .from("family_tree")
+//     .select("*")
+//     .eq("id", nodeId)
+//     .single();
+
+//   if (nodeError) {
+//     console.error("Error fetching node:", nodeError);
+//     return;
+//   }
+
+//   // Recursively delete all children
+//   if (node.children && node.children.length > 0) {
+//     for (const childId of node.children) {
+//       await deleteNodeAndChildren(childId);
+//     }
+//   }
+
+//   // Finally delete this node
+//   const { error: deleteError } = await supabase
+//     .from("family_tree")
+//     .delete()
+//     .eq("id", nodeId);
+
+//   if (deleteError) {
+//     console.error("Error deleting node:", deleteError);
+//   }
+// };
+
 // ----- Component -----
 const FamilyTree: React.FC = () => {
   const [data, setData] = useState<Person>(initialData);
@@ -236,7 +268,6 @@ const FamilyTree: React.FC = () => {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const contextMenuRef = useRef<HTMLUListElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-  //const saveTimeoutRef = useRef<NodeJS.Timeout>();
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Debug keyboard shortcut
@@ -293,14 +324,30 @@ const FamilyTree: React.FC = () => {
       setLoadError(null);
       setSupabaseStatus("checking");
 
-      // Test Supabase connection
+      console.log("Loading data from Supabase...");
+
+      // Test Supabase connection with simpler query
       const { error: testError } = await supabase
         .from("family_tree")
-        .select("count")
+        .select("id")
         .limit(1);
 
+      // if (testError) {
+      //   console.error("Supabase connection error:", testError);
+      //   throw new Error(`Supabase connection error: ${testError.message}`);
+      // }
       if (testError) {
-        throw new Error(`Supabase connection error: ${testError.message}`);
+        console.error("Supabase connection error:", testError);
+
+        // Check if it's a table doesn't exist error
+        if (testError.message.includes("does not exist")) {
+          setLoadError(
+            "Table doesn't exist. Please create the family_tree table in Supabase."
+          );
+        } else {
+          throw new Error(`Supabase connection error: ${testError.message}`);
+        }
+        return;
       }
 
       setSupabaseStatus("connected");
@@ -311,6 +358,8 @@ const FamilyTree: React.FC = () => {
         .select("*")
         .order("id");
 
+      console.log("Supabase response:", { supabaseData, error });
+
       if (error) {
         console.error("Error loading data from Supabase:", error);
         // If no data exists, initialize with sample data
@@ -319,13 +368,14 @@ const FamilyTree: React.FC = () => {
       }
 
       if (supabaseData && supabaseData.length > 0) {
-        console.log("Supabase raw data:", supabaseData);
+        console.log("Data loaded successfully:", supabaseData);
         const treeData = buildTree(supabaseData);
         if (treeData) {
           setData(treeData);
         }
       } else {
         // If no data exists, initialize with sample data
+        console.log("No data found, initializing...");
         await initializeSupabaseData();
       }
     } catch (error) {
@@ -342,14 +392,32 @@ const FamilyTree: React.FC = () => {
   // Initialize Supabase with sample data
   const initializeSupabaseData = useCallback(async () => {
     try {
+      console.log("Initializing Supabase with sample data...");
+
+      // First check if table exists and is accessible
+      const { error: tableError } = await supabase
+        .from("family_tree")
+        .select("id")
+        .limit(1);
+
+      if (tableError) {
+        console.error("Table access error:", tableError);
+        setLoadError(
+          "Cannot access database table. Check if it exists and permissions are set."
+        );
+        return;
+      }
+
       const flatData = flattenTree(initialData);
       const { error } = await supabase.from("family_tree").upsert(flatData);
 
       if (error) {
         console.error("Error initializing Supabase data:", error);
+        setLoadError(`Initialization failed: ${error.message}`);
         throw error;
       }
 
+      console.log("Supabase initialized successfully");
       // Reload data after initialization
       await loadDataFromSupabase();
     } catch (error) {
@@ -370,6 +438,7 @@ const FamilyTree: React.FC = () => {
         console.error("Error saving data to Supabase:", error);
         return false;
       }
+      console.log("Data saved successfully");
       return true;
     } catch (error) {
       console.error("Error saving data:", error);
@@ -383,14 +452,7 @@ const FamilyTree: React.FC = () => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-    if (
-      supabaseUrl &&
-      supabaseKey &&
-      !supabaseUrl.includes("https://cryyxpbbbvvvnzzrkqkq.supabase.co") &&
-      !supabaseKey.includes(
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyeXl4cGJiYnZ2dm56enJrcWtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcyOTA1MDcsImV4cCI6MjA3Mjg2NjUwN30.4dxhGNr_XWxANvsDULcQSs0H36uehzgbTOP-WvHetOU"
-      )
-    ) {
+    if (supabaseUrl && supabaseKey) {
       loadDataFromSupabase();
     } else {
       setLoading(false);
@@ -474,13 +536,13 @@ const FamilyTree: React.FC = () => {
         if (error) {
           console.error("Error saving child to Supabase:", error);
           // Revert UI if there's an error
-          setData((prev) => prev); // This will force a re-render with the previous data
+          setData(data);
           alert("Error saving child. Please try again.");
         }
       } catch (error) {
         console.error("Error saving data:", error);
         // Revert UI if there's an error
-        setData((prev) => prev);
+        setData(data);
         alert("Error saving child. Please try again.");
       }
 
@@ -510,13 +572,13 @@ const FamilyTree: React.FC = () => {
         if (error) {
           console.error("Error saving edited node to Supabase:", error);
           // Revert UI if there's an error
-          setData((prev) => prev);
+          setData(data);
           alert("Error saving changes. Please try again.");
         }
       } catch (error) {
         console.error("Error saving data:", error);
         // Revert UI if there's an error
-        setData((prev) => prev);
+        setData(data);
         alert("Error saving changes. Please try again.");
       }
 
@@ -525,35 +587,150 @@ const FamilyTree: React.FC = () => {
     [data]
   );
 
+  // // Delete recursively, deleting parent deletes child as well
+  // const deleteNode = useCallback(
+  //   async (id: string) => {
+  //     // Store the current data for potential revert
+  //     const previousData = data;
+
+  //     // Check if we're trying to delete the root node
+  //     if (previousData.id === id) {
+  //       alert("Cannot delete the root node.");
+  //       return;
+  //     }
+
+  //     // Create updated data first
+  //     const updatedData =
+  //       updateTree(data, (n) => (n.id === id ? null : n)) || initialData;
+
+  //     // Update state immediately for UI responsiveness
+  //     setData(updatedData);
+
+  //     try {
+  //       // Recursively delete the node and all its children from Supabase
+  //       await deleteNodeAndChildren(id);
+
+  //       // Then update all nodes that had this node as a child
+  //       const { data: nodesWithChild, error: queryError } = await supabase
+  //         .from("family_tree")
+  //         .select("*")
+  //         .contains("children", [id]);
+
+  //       if (queryError) {
+  //         console.error("Error querying nodes with child:", queryError);
+  //         throw queryError;
+  //       }
+
+  //       // Update each node to remove the deleted node from its children array
+  //       for (const node of nodesWithChild) {
+  //         const updatedChildren = node.children.filter(
+  //           (childId: string) => childId !== id
+  //         );
+
+  //         const { error: updateError } = await supabase
+  //           .from("family_tree")
+  //           .update({ children: updatedChildren })
+  //           .eq("id", node.id);
+
+  //         if (updateError) {
+  //           console.error("Error updating parent node:", updateError);
+  //           throw updateError;
+  //         }
+  //       }
+
+  //       // Convert to flat structure and save the entire tree to Supabase
+  //       const flatData = flattenTree(updatedData);
+  //       const { error: upsertError } = await supabase
+  //         .from("family_tree")
+  //         .upsert(flatData);
+
+  //       if (upsertError) {
+  //         console.error("Error saving tree to Supabase:", upsertError);
+  //         throw upsertError;
+  //       }
+  //     } catch (error) {
+  //       console.error("Error deleting node:", error);
+  //       // Revert UI if there's an error
+  //       setData(previousData);
+  //       alert("Error deleting node. Please try again.");
+  //     }
+
+  //     setMenu(null);
+  //   },
+  //   [data]
+  // );
+
   const deleteNode = useCallback(
     async (id: string) => {
-      if (data.id === id) {
+      // Store the current data for potential revert
+      const previousData = data;
+
+      // Check if we're trying to delete the root node
+      if (previousData.id === id) {
         alert("Cannot delete the root node.");
         return;
       }
 
-      // Store the current data for potential revert
-      const previousData = data;
+      // Create updated data first
+      const updatedData =
+        updateTree(data, (n) => (n.id === id ? null : n)) || initialData;
 
       // Update state immediately for UI responsiveness
-      setData((prev) => {
-        const next = updateTree(prev, (n) => (n.id === id ? null : n));
-        return next ?? prev;
-      });
+      setData(updatedData);
 
       try {
-        // Convert to flat structure and save to Supabase
-        const flatData = flattenTree(data);
-        const { error } = await supabase.from("family_tree").upsert(flatData);
+        // First, delete the node from Supabase
+        const { error: deleteError } = await supabase
+          .from("family_tree")
+          .delete()
+          .eq("id", id);
 
-        if (error) {
-          console.error("Error deleting node from Supabase:", error);
-          // Revert UI if there's an error
-          setData(previousData);
-          alert("Error deleting node. Please try again.");
+        if (deleteError) {
+          console.error("Error deleting node from Supabase:", deleteError);
+          throw deleteError;
+        }
+
+        // Then update all nodes that had this node as a child
+        // Find all nodes that reference this node in their children array
+        const { data: nodesWithChild, error: queryError } = await supabase
+          .from("family_tree")
+          .select("*")
+          .contains("children", [id]);
+
+        if (queryError) {
+          console.error("Error querying nodes with child:", queryError);
+          throw queryError;
+        }
+
+        // Update each node to remove the deleted node from its children array
+        for (const node of nodesWithChild) {
+          const updatedChildren = node.children.filter(
+            (childId: string) => childId !== id
+          );
+
+          const { error: updateError } = await supabase
+            .from("family_tree")
+            .update({ children: updatedChildren })
+            .eq("id", node.id);
+
+          if (updateError) {
+            console.error("Error updating parent node:", updateError);
+            throw updateError;
+          }
+        }
+
+        // Convert to flat structure and save the entire tree to Supabase
+        const flatData = flattenTree(updatedData);
+        const { error: upsertError } = await supabase
+          .from("family_tree")
+          .upsert(flatData);
+
+        if (upsertError) {
+          console.error("Error saving tree to Supabase:", upsertError);
+          throw upsertError;
         }
       } catch (error) {
-        console.error("Error saving data:", error);
+        console.error("Error deleting node:", error);
         // Revert UI if there's an error
         setData(previousData);
         alert("Error deleting node. Please try again.");
@@ -561,7 +738,7 @@ const FamilyTree: React.FC = () => {
 
       setMenu(null);
     },
-    [data, data.id]
+    [data]
   );
 
   const addParentAbove = useCallback(
@@ -572,25 +749,25 @@ const FamilyTree: React.FC = () => {
       // Store the current data for potential revert
       const previousData = data;
 
-      // Update state immediately for UI responsiveness
-      setData((prev) => {
-        // If we're adding above the root
-        if (prev.id === id) {
-          return { id: genId(), name, children: [prev] };
-        }
-
-        // If we're adding above a non-root node
-        return mapTree(prev, (n) => {
+      // Create updated data
+      let updatedData: Person;
+      if (previousData.id === id) {
+        updatedData = { id: genId(), name, children: [previousData] };
+      } else {
+        updatedData = mapTree(previousData, (n) => {
           if (n.id === id) {
             return { id: genId(), name, children: [n] };
           }
           return n;
         });
-      });
+      }
+
+      // Update state immediately for UI responsiveness
+      setData(updatedData);
 
       try {
         // Convert to flat structure and save to Supabase
-        const flatData = flattenTree(data);
+        const flatData = flattenTree(updatedData);
         const { error } = await supabase.from("family_tree").upsert(flatData);
 
         if (error) {
@@ -626,16 +803,16 @@ const FamilyTree: React.FC = () => {
       .call(zoomRef.current.transform, d3.zoomIdentity);
   }, []);
 
-  // Reset tree to initial data
-  const resetTree = useCallback(async () => {
-    if (
-      window.confirm(
-        "Are you sure you want to reset the tree? This will restore the original sample data."
-      )
-    ) {
-      await initializeSupabaseData();
-    }
-  }, [initializeSupabaseData]);
+  // // Reset tree to initial data
+  // const resetTree = useCallback(async () => {
+  //   if (
+  //     window.confirm(
+  //       "Are you sure you want to reset the tree? This will restore the original sample data."
+  //     )
+  //   ) {
+  //     await initializeSupabaseData();
+  //   }
+  // }, [initializeSupabaseData]);
 
   // D3 render
   useEffect(() => {
@@ -920,6 +1097,33 @@ const FamilyTree: React.FC = () => {
         >
           {loadError}
         </p>
+        {/* Add this section for table creation */}
+        {loadError.includes("Table doesn't exist") && (
+          <div style={{ marginTop: "20px", textAlign: "center" }}>
+            <p style={{ marginBottom: "10px" }}>
+              You need to create the table in Supabase:
+            </p>
+            <button
+              onClick={() =>
+                window.open(
+                  "https://supabase.com/dashboard/project/cryyxpbbbvvvnzzrkqkq/sql",
+                  "_blank"
+                )
+              }
+              style={{
+                padding: "10px 20px",
+                background: "#3498db",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                marginTop: "10px",
+              }}
+            >
+              Open SQL Editor in Supabase
+            </button>
+          </div>
+        )}
         <button
           onClick={loadDataFromSupabase}
           style={{
@@ -1013,18 +1217,18 @@ const FamilyTree: React.FC = () => {
         )}
 
         <button
-          onClick={resetTree}
-          style={{
-            padding: "8px 12px",
-            background: "#ff9800",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-            fontFamily: "system-ui",
-            fontSize: "14px",
-            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-          }}
+        // onClick={resetTree}
+        // style={{
+        //   padding: "8px 12px",
+        //   background: "#ff9800",
+        //   color: "white",
+        //   border: "none",
+        //   borderRadius: "4px",
+        //   cursor: "pointer",
+        //   fontFamily: "system-ui",
+        //   fontSize: "14px",
+        //   boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+        // }}
         >
           Reset Tree Data
         </button>

@@ -1,9 +1,9 @@
 // src/FamilyTree.tsx
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import * as d3 from "d3";
-import { supabase } from "./supabaseClient";
+import { firebase, type FirebasePersonDoc } from "./firebaseClient";
 
-// ----- Types -----
+/// ----- Types -----
 export interface Person {
   id: string;
   name: string;
@@ -11,29 +11,21 @@ export interface Person {
   _collapsed?: boolean;
 }
 
-// Supabase types
-interface SupabasePerson {
-  id: string;
-  name: string;
-  parent_id: string | null;
-  children: string[];
-  collapsed: boolean;
-}
-
 // ----- Debug Component -----
 interface DebugInfoProps {
-  supabaseUrl: string;
-  supabaseKey: string;
+  firebaseConfig: {
+    apiKey: string;
+    projectId: string;
+  };
   environment: string;
-  supabaseStatus: string;
+  firebaseStatus: string;
   error: string | null;
 }
 
 const DebugInfo: React.FC<DebugInfoProps> = ({
-  supabaseUrl,
-  supabaseKey,
+  firebaseConfig,
   environment,
-  supabaseStatus,
+  firebaseStatus,
   error,
 }) => {
   return (
@@ -55,22 +47,22 @@ const DebugInfo: React.FC<DebugInfoProps> = ({
       <h4 style={{ margin: "0 0 10px 0" }}>Debug Information</h4>
       <p>Environment: {environment}</p>
       <p>
-        Supabase Status:{" "}
+        Firebase Status:{" "}
         <span
           style={{
             color:
-              supabaseStatus === "connected"
+              firebaseStatus === "connected"
                 ? "#4caf50"
-                : supabaseStatus === "error"
+                : firebaseStatus === "error"
                 ? "#e74c3c"
                 : "#f39c12",
           }}
         >
-          {supabaseStatus}
+          {firebaseStatus}
         </span>
       </p>
-      <p>Supabase URL: {supabaseUrl ? "Set" : "Not set"}</p>
-      <p>Supabase Key: {supabaseKey ? "Set" : "Not set"}</p>
+      <p>Firebase API Key: {firebaseConfig.apiKey ? "Set" : "Not set"}</p>
+      <p>Firebase Project ID: {firebaseConfig.projectId ? "Set" : "Not set"}</p>
       {error && <p style={{ color: "#e74c3c" }}>Error: {error}</p>}
       <p>Build Date: {new Date().toISOString()}</p>
     </div>
@@ -161,12 +153,12 @@ const getPathToNode = (node: Person, id: string): Person[] => {
   return [];
 };
 
-// Convert tree structure to flat array for Supabase
+// Convert tree structure to flat array for Firebase
 const flattenTree = (
   node: Person,
   parentId: string | null = null
-): SupabasePerson[] => {
-  const flattened: SupabasePerson[] = [
+): FirebasePersonDoc[] => {
+  const flattened: FirebasePersonDoc[] = [
     {
       id: node.id,
       name: node.name,
@@ -186,7 +178,7 @@ const flattenTree = (
 };
 
 // Convert flat array back to tree structure
-const buildTree = (flatData: SupabasePerson[]): Person | null => {
+const buildTree = (flatData: FirebasePersonDoc[]): Person | null => {
   if (flatData.length === 0) return null;
 
   // Create a map for quick lookup
@@ -197,7 +189,7 @@ const buildTree = (flatData: SupabasePerson[]): Person | null => {
     nodeMap.set(item.id, {
       id: item.id,
       name: item.name,
-      _collapsed: item.collapsed,
+      _collapsed: item.collapsed || false,
       children: [],
     });
   });
@@ -207,7 +199,7 @@ const buildTree = (flatData: SupabasePerson[]): Person | null => {
     const node = nodeMap.get(item.id);
     if (node && item.children) {
       node.children = item.children
-        .map((childId) => nodeMap.get(childId))
+        .map((childId: string) => nodeMap.get(childId))
         .filter((child): child is Person => child !== undefined);
     }
   });
@@ -217,37 +209,28 @@ const buildTree = (flatData: SupabasePerson[]): Person | null => {
   return rootItem ? nodeMap.get(rootItem.id) || null : null;
 };
 
-// // delete recursively (delete parent, deletes everything under it)
-// const deleteNodeAndChildren = async (nodeId: string) => {
-//   // First get the node to find its children
-//   const { data: node, error: nodeError } = await supabase
-//     .from("family_tree")
-//     .select("*")
-//     .eq("id", nodeId)
-//     .single();
+// Recursive delete function for Firebase
+const deleteNodeAndChildren = async (nodeId: string) => {
+  try {
+    // First get the node to find its children
+    const node = await firebase.getById(nodeId);
 
-//   if (nodeError) {
-//     console.error("Error fetching node:", nodeError);
-//     return;
-//   }
+    if (!node) return;
 
-//   // Recursively delete all children
-//   if (node.children && node.children.length > 0) {
-//     for (const childId of node.children) {
-//       await deleteNodeAndChildren(childId);
-//     }
-//   }
+    // Recursively delete all children
+    if (node.children && node.children.length > 0) {
+      for (const childId of node.children) {
+        await deleteNodeAndChildren(childId);
+      }
+    }
 
-//   // Finally delete this node
-//   const { error: deleteError } = await supabase
-//     .from("family_tree")
-//     .delete()
-//     .eq("id", nodeId);
-
-//   if (deleteError) {
-//     console.error("Error deleting node:", deleteError);
-//   }
-// };
+    // Finally delete this node
+    await firebase.delete(nodeId);
+  } catch (error) {
+    console.error("Error in deleteNodeAndChildren:", error);
+    throw error;
+  }
+};
 
 // ----- Component -----
 const FamilyTree: React.FC = () => {
@@ -258,9 +241,9 @@ const FamilyTree: React.FC = () => {
     nodeId: string;
   } | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [viewRootId, setViewRootId] = useState<string>("3"); // Start at grandparent level
+  const [viewRootId, setViewRootId] = useState<string>("3");
   const [loading, setLoading] = useState<boolean>(true);
-  const [supabaseStatus, setSupabaseStatus] = useState<
+  const [firebaseStatus, setFirebaseStatus] = useState<
     "checking" | "connected" | "error"
   >("checking");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -282,28 +265,16 @@ const FamilyTree: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyPress);
   }, []);
 
-  // Check if Supabase is properly configured
+  // Check if Firebase is properly configured
   useEffect(() => {
-    const checkSupabaseConfig = () => {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const checkFirebaseConfig = () => {
+      const firebaseApiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+      const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
 
-      if (!supabaseUrl || !supabaseKey) {
-        setSupabaseStatus("error");
+      if (!firebaseApiKey || !firebaseProjectId) {
+        setFirebaseStatus("error");
         setLoadError(
-          "Supabase environment variables are not configured. Please check your .env file and Vercel settings."
-        );
-        setLoading(false);
-        return false;
-      }
-
-      if (
-        supabaseUrl.includes("your_supabase_project_url_here") ||
-        supabaseKey.includes("your_supabase_anon_key_here")
-      ) {
-        setSupabaseStatus("error");
-        setLoadError(
-          "Supabase environment variables are using placeholder values. Please update them with your actual Supabase credentials."
+          "Firebase environment variables are not configured. Please check your .env file and Vercel settings."
         );
         setLoading(false);
         return false;
@@ -312,75 +283,45 @@ const FamilyTree: React.FC = () => {
       return true;
     };
 
-    if (!checkSupabaseConfig()) {
+    if (!checkFirebaseConfig()) {
       return;
     }
   }, []);
 
-  // Load data from Supabase
-  const loadDataFromSupabase = useCallback(async () => {
+  // Load data from Firebase
+  const loadDataFromFirebase = useCallback(async () => {
     try {
       setLoading(true);
       setLoadError(null);
-      setSupabaseStatus("checking");
+      setFirebaseStatus("checking");
 
-      console.log("Loading data from Supabase...");
+      console.log("Loading data from Firebase...");
 
-      // Test Supabase connection with simpler query
-      const { error: testError } = await supabase
-        .from("family_tree")
-        .select("id")
-        .limit(1);
+      // Test Firebase connection
+      const testData = await firebase.getAll();
+      console.log("Firebase connection test:", testData);
 
-      // if (testError) {
-      //   console.error("Supabase connection error:", testError);
-      //   throw new Error(`Supabase connection error: ${testError.message}`);
-      // }
-      if (testError) {
-        console.error("Supabase connection error:", testError);
-
-        // Check if it's a table doesn't exist error
-        if (testError.message.includes("does not exist")) {
-          setLoadError(
-            "Table doesn't exist. Please create the family_tree table in Supabase."
-          );
-        } else {
-          throw new Error(`Supabase connection error: ${testError.message}`);
-        }
-        return;
-      }
-
-      setSupabaseStatus("connected");
+      setFirebaseStatus("connected");
 
       // Load actual data
-      const { data: supabaseData, error } = await supabase
-        .from("family_tree")
-        .select("*")
-        .order("id");
+      const firebaseData = await firebase.getAll();
+      console.log("Firebase response:", firebaseData);
 
-      console.log("Supabase response:", { supabaseData, error });
-
-      if (error) {
-        console.error("Error loading data from Supabase:", error);
-        // If no data exists, initialize with sample data
-        await initializeSupabaseData();
-        return;
-      }
-
-      if (supabaseData && supabaseData.length > 0) {
-        console.log("Data loaded successfully:", supabaseData);
-        const treeData = buildTree(supabaseData);
+      if (firebaseData && firebaseData.length > 0) {
+        console.log("Data loaded successfully:", firebaseData);
+        // Cast to FirebasePersonDoc[] if needed
+        const treeData = buildTree(firebaseData as FirebasePersonDoc[]);
         if (treeData) {
           setData(treeData);
         }
       } else {
         // If no data exists, initialize with sample data
         console.log("No data found, initializing...");
-        await initializeSupabaseData();
+        await initializeFirebaseData();
       }
     } catch (error) {
       console.error("Error loading data:", error);
-      setSupabaseStatus("error");
+      setFirebaseStatus("error");
       setLoadError(
         error instanceof Error ? error.message : "Unknown error occurred"
       );
@@ -389,79 +330,72 @@ const FamilyTree: React.FC = () => {
     }
   }, []);
 
-  // Initialize Supabase with sample data
-  const initializeSupabaseData = useCallback(async () => {
+  // Initialize Firebase with sample data
+  const initializeFirebaseData = useCallback(async () => {
     try {
-      console.log("Initializing Supabase with sample data...");
-
-      // First check if table exists and is accessible
-      const { error: tableError } = await supabase
-        .from("family_tree")
-        .select("id")
-        .limit(1);
-
-      if (tableError) {
-        console.error("Table access error:", tableError);
-        setLoadError(
-          "Cannot access database table. Check if it exists and permissions are set."
-        );
-        return;
-      }
+      console.log("Initializing Firebase with sample data...");
 
       const flatData = flattenTree(initialData);
-      const { error } = await supabase.from("family_tree").upsert(flatData);
 
-      if (error) {
-        console.error("Error initializing Supabase data:", error);
-        setLoadError(`Initialization failed: ${error.message}`);
-        throw error;
+      // Save each document to Firebase
+      for (const person of flatData) {
+        await firebase.upsert(person.id, {
+          name: person.name,
+          parent_id: person.parent_id,
+          children: person.children,
+          collapsed: person.collapsed,
+        });
       }
 
-      console.log("Supabase initialized successfully");
+      console.log("Firebase initialized successfully");
       // Reload data after initialization
-      await loadDataFromSupabase();
+      await loadDataFromFirebase();
     } catch (error) {
       console.error("Error initializing data:", error);
       setLoadError(
         error instanceof Error ? error.message : "Unknown error occurred"
       );
     }
-  }, [loadDataFromSupabase]);
+  }, [loadDataFromFirebase]);
 
-  // Save data to Supabase
-  const saveDataToSupabase = useCallback(async () => {
+  // Save data to Firebase
+  const saveDataToFirebase = useCallback(async () => {
     try {
       const flatData = flattenTree(data);
-      const { error } = await supabase.from("family_tree").upsert(flatData);
 
-      if (error) {
-        console.error("Error saving data to Supabase:", error);
-        return false;
+      // Save each person to Firebase
+      for (const person of flatData) {
+        await firebase.upsert(person.id, {
+          name: person.name,
+          parent_id: person.parent_id,
+          children: person.children,
+          collapsed: person.collapsed,
+        });
       }
-      console.log("Data saved successfully");
+
+      console.log("Data saved successfully to Firebase");
       return true;
     } catch (error) {
-      console.error("Error saving data:", error);
+      console.error("Error saving data to Firebase:", error);
       return false;
     }
   }, [data]);
 
-  // Load data from Supabase on component mount
+  // Load data from Firebase on component mount
   useEffect(() => {
-    // Only load data if Supabase is properly configured
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const firebaseApiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+    const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
 
-    if (supabaseUrl && supabaseKey) {
-      loadDataFromSupabase();
+    if (firebaseApiKey && firebaseProjectId) {
+      loadDataFromFirebase();
     } else {
       setLoading(false);
     }
-  }, [loadDataFromSupabase]);
+  }, [loadDataFromFirebase]);
 
-  // Save data to Supabase with debounce
+  // Save data to Firebase with debounce
   useEffect(() => {
-    if (!loading && supabaseStatus === "connected") {
+    if (!loading && firebaseStatus === "connected") {
       // Clear any existing timeout
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
@@ -469,7 +403,7 @@ const FamilyTree: React.FC = () => {
 
       // Set a new timeout to save after 1 second of inactivity
       saveTimeoutRef.current = setTimeout(() => {
-        saveDataToSupabase();
+        saveDataToFirebase();
       }, 1000);
     }
 
@@ -479,7 +413,7 @@ const FamilyTree: React.FC = () => {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [data, loading, saveDataToSupabase, supabaseStatus]);
+  }, [data, loading, saveDataToFirebase, firebaseStatus]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -529,18 +463,23 @@ const FamilyTree: React.FC = () => {
       setData(updatedData);
 
       try {
-        // Convert to flat structure and save to Supabase
-        const flatData = flattenTree(updatedData);
-        const { error } = await supabase.from("family_tree").upsert(flatData);
+        // Save the new child to Firebase
+        await firebase.upsert(child.id, {
+          name: child.name,
+          parent_id: id,
+          children: [],
+          collapsed: false,
+        });
 
-        if (error) {
-          console.error("Error saving child to Supabase:", error);
-          // Revert UI if there's an error
-          setData(data);
-          alert("Error saving child. Please try again.");
+        // Update the parent's children array in Firebase
+        const parent = findNode(updatedData, id);
+        if (parent) {
+          await firebase.update(id, {
+            children: parent.children?.map((c) => c.id) || [],
+          });
         }
       } catch (error) {
-        console.error("Error saving data:", error);
+        console.error("Error saving child to Firebase:", error);
         // Revert UI if there's an error
         setData(data);
         alert("Error saving child. Please try again.");
@@ -565,18 +504,10 @@ const FamilyTree: React.FC = () => {
       setData(updatedData);
 
       try {
-        // Convert to flat structure and save to Supabase
-        const flatData = flattenTree(updatedData);
-        const { error } = await supabase.from("family_tree").upsert(flatData);
-
-        if (error) {
-          console.error("Error saving edited node to Supabase:", error);
-          // Revert UI if there's an error
-          setData(data);
-          alert("Error saving changes. Please try again.");
-        }
+        // Update the node in Firebase
+        await firebase.update(id, { name });
       } catch (error) {
-        console.error("Error saving data:", error);
+        console.error("Error saving edited node to Firebase:", error);
         // Revert UI if there's an error
         setData(data);
         alert("Error saving changes. Please try again.");
@@ -586,79 +517,6 @@ const FamilyTree: React.FC = () => {
     },
     [data]
   );
-
-  // // Delete recursively, deleting parent deletes child as well
-  // const deleteNode = useCallback(
-  //   async (id: string) => {
-  //     // Store the current data for potential revert
-  //     const previousData = data;
-
-  //     // Check if we're trying to delete the root node
-  //     if (previousData.id === id) {
-  //       alert("Cannot delete the root node.");
-  //       return;
-  //     }
-
-  //     // Create updated data first
-  //     const updatedData =
-  //       updateTree(data, (n) => (n.id === id ? null : n)) || initialData;
-
-  //     // Update state immediately for UI responsiveness
-  //     setData(updatedData);
-
-  //     try {
-  //       // Recursively delete the node and all its children from Supabase
-  //       await deleteNodeAndChildren(id);
-
-  //       // Then update all nodes that had this node as a child
-  //       const { data: nodesWithChild, error: queryError } = await supabase
-  //         .from("family_tree")
-  //         .select("*")
-  //         .contains("children", [id]);
-
-  //       if (queryError) {
-  //         console.error("Error querying nodes with child:", queryError);
-  //         throw queryError;
-  //       }
-
-  //       // Update each node to remove the deleted node from its children array
-  //       for (const node of nodesWithChild) {
-  //         const updatedChildren = node.children.filter(
-  //           (childId: string) => childId !== id
-  //         );
-
-  //         const { error: updateError } = await supabase
-  //           .from("family_tree")
-  //           .update({ children: updatedChildren })
-  //           .eq("id", node.id);
-
-  //         if (updateError) {
-  //           console.error("Error updating parent node:", updateError);
-  //           throw updateError;
-  //         }
-  //       }
-
-  //       // Convert to flat structure and save the entire tree to Supabase
-  //       const flatData = flattenTree(updatedData);
-  //       const { error: upsertError } = await supabase
-  //         .from("family_tree")
-  //         .upsert(flatData);
-
-  //       if (upsertError) {
-  //         console.error("Error saving tree to Supabase:", upsertError);
-  //         throw upsertError;
-  //       }
-  //     } catch (error) {
-  //       console.error("Error deleting node:", error);
-  //       // Revert UI if there's an error
-  //       setData(previousData);
-  //       alert("Error deleting node. Please try again.");
-  //     }
-
-  //     setMenu(null);
-  //   },
-  //   [data]
-  // );
 
   const deleteNode = useCallback(
     async (id: string) => {
@@ -679,28 +537,16 @@ const FamilyTree: React.FC = () => {
       setData(updatedData);
 
       try {
-        // First, delete the node from Supabase
-        const { error: deleteError } = await supabase
-          .from("family_tree")
-          .delete()
-          .eq("id", id);
+        // Recursively delete the node and all its children from Firebase
+        await deleteNodeAndChildren(id);
 
-        if (deleteError) {
-          console.error("Error deleting node from Supabase:", deleteError);
-          throw deleteError;
-        }
-
-        // Then update all nodes that had this node as a child
-        // Find all nodes that reference this node in their children array
-        const { data: nodesWithChild, error: queryError } = await supabase
-          .from("family_tree")
-          .select("*")
-          .contains("children", [id]);
-
-        if (queryError) {
-          console.error("Error querying nodes with child:", queryError);
-          throw queryError;
-        }
+        // Find and update all nodes that had this node as a child
+        const allNodes = await firebase.getAll();
+        const nodesWithChild = allNodes.filter(
+          (
+            node: FirebasePersonDoc // Change here
+          ) => node.children && node.children.includes(id)
+        );
 
         // Update each node to remove the deleted node from its children array
         for (const node of nodesWithChild) {
@@ -708,26 +554,7 @@ const FamilyTree: React.FC = () => {
             (childId: string) => childId !== id
           );
 
-          const { error: updateError } = await supabase
-            .from("family_tree")
-            .update({ children: updatedChildren })
-            .eq("id", node.id);
-
-          if (updateError) {
-            console.error("Error updating parent node:", updateError);
-            throw updateError;
-          }
-        }
-
-        // Convert to flat structure and save the entire tree to Supabase
-        const flatData = flattenTree(updatedData);
-        const { error: upsertError } = await supabase
-          .from("family_tree")
-          .upsert(flatData);
-
-        if (upsertError) {
-          console.error("Error saving tree to Supabase:", upsertError);
-          throw upsertError;
+          await firebase.update(node.id, { children: updatedChildren });
         }
       } catch (error) {
         console.error("Error deleting node:", error);
@@ -766,18 +593,18 @@ const FamilyTree: React.FC = () => {
       setData(updatedData);
 
       try {
-        // Convert to flat structure and save to Supabase
+        // Convert to flat structure and save to Firebase
         const flatData = flattenTree(updatedData);
-        const { error } = await supabase.from("family_tree").upsert(flatData);
-
-        if (error) {
-          console.error("Error saving new parent to Supabase:", error);
-          // Revert UI if there's an error
-          setData(previousData);
-          alert("Error adding parent. Please try again.");
+        for (const person of flatData) {
+          await firebase.upsert(person.id, {
+            name: person.name,
+            parent_id: person.parent_id,
+            children: person.children,
+            collapsed: person.collapsed,
+          });
         }
       } catch (error) {
-        console.error("Error saving data:", error);
+        console.error("Error saving new parent to Firebase:", error);
         // Revert UI if there's an error
         setData(previousData);
         alert("Error adding parent. Please try again.");
@@ -803,18 +630,18 @@ const FamilyTree: React.FC = () => {
       .call(zoomRef.current.transform, d3.zoomIdentity);
   }, []);
 
-  // // Reset tree to initial data
-  // const resetTree = useCallback(async () => {
-  //   if (
-  //     window.confirm(
-  //       "Are you sure you want to reset the tree? This will restore the original sample data."
-  //     )
-  //   ) {
-  //     await initializeSupabaseData();
-  //   }
-  // }, [initializeSupabaseData]);
+  // Reset tree to initial data
+  const resetTree = useCallback(async () => {
+    if (
+      window.confirm(
+        "Are you sure you want to reset the tree? This will restore the original sample data."
+      )
+    ) {
+      await initializeFirebaseData();
+    }
+  }, [initializeFirebaseData]);
 
-  // D3 render
+  // D3 render (unchanged from your original code)
   useEffect(() => {
     if (loading) return;
 
@@ -984,7 +811,7 @@ const FamilyTree: React.FC = () => {
     const toggler = node
       .filter((d: d3.HierarchyPointNode<Person>) => needsToggle(d))
       .append("g")
-      .attr("transform", `translate(0, ${nodeH / 2 + 15})`) // Position below the node
+      .attr("transform", `translate(0, ${nodeH / 2 + 15})`)
       .style("cursor", "pointer")
       .on("click", (_, d: d3.HierarchyPointNode<Person>) => {
         toggleCollapse(d.data.id);
@@ -992,7 +819,7 @@ const FamilyTree: React.FC = () => {
 
     toggler
       .append("circle")
-      .attr("r", 8) // Smaller circle
+      .attr("r", 8)
       .attr("fill", "#ffffff")
       .attr("stroke", "#1565C0")
       .attr("stroke-width", 1.5);
@@ -1002,7 +829,7 @@ const FamilyTree: React.FC = () => {
       .attr("text-anchor", "middle")
       .attr("dy", "0.35em")
       .attr("fill", "#1565C0")
-      .style("font-size", "12px") // Smaller text
+      .style("font-size", "12px")
       .style("font-weight", "700")
       .text((d: d3.HierarchyPointNode<Person>) =>
         d.data._collapsed ?? false ? "+" : "−"
@@ -1097,18 +924,15 @@ const FamilyTree: React.FC = () => {
         >
           {loadError}
         </p>
-        {/* Add this section for table creation */}
-        {loadError.includes("Table doesn't exist") && (
+        {/* Firebase error handling */}
+        {loadError.includes("Firebase") && (
           <div style={{ marginTop: "20px", textAlign: "center" }}>
             <p style={{ marginBottom: "10px" }}>
-              You need to create the table in Supabase:
+              Please check your Firebase configuration:
             </p>
             <button
               onClick={() =>
-                window.open(
-                  "https://supabase.com/dashboard/project/cryyxpbbbvvvnzzrkqkq/sql",
-                  "_blank"
-                )
+                window.open("https://console.firebase.google.com/", "_blank")
               }
               style={{
                 padding: "10px 20px",
@@ -1118,14 +942,15 @@ const FamilyTree: React.FC = () => {
                 borderRadius: "4px",
                 cursor: "pointer",
                 marginTop: "10px",
+                marginRight: "10px",
               }}
             >
-              Open SQL Editor in Supabase
+              Open Firebase Console
             </button>
           </div>
         )}
         <button
-          onClick={loadDataFromSupabase}
+          onClick={loadDataFromFirebase}
           style={{
             padding: "10px 20px",
             background: "#3498db",
@@ -1133,6 +958,7 @@ const FamilyTree: React.FC = () => {
             border: "none",
             borderRadius: "4px",
             cursor: "pointer",
+            marginTop: "20px",
           }}
         >
           Retry
@@ -1217,18 +1043,18 @@ const FamilyTree: React.FC = () => {
         )}
 
         <button
-        // onClick={resetTree}
-        // style={{
-        //   padding: "8px 12px",
-        //   background: "#ff9800",
-        //   color: "white",
-        //   border: "none",
-        //   borderRadius: "4px",
-        //   cursor: "pointer",
-        //   fontFamily: "system-ui",
-        //   fontSize: "14px",
-        //   boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-        // }}
+          onClick={resetTree}
+          style={{
+            padding: "8px 12px",
+            background: "#ff9800",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontFamily: "system-ui",
+            fontSize: "14px",
+            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+          }}
         >
           Reset Tree Data
         </button>
@@ -1399,10 +1225,12 @@ const FamilyTree: React.FC = () => {
       {/* Debug information */}
       {showDebug && (
         <DebugInfo
-          supabaseUrl={import.meta.env.VITE_SUPABASE_URL || ""}
-          supabaseKey={import.meta.env.VITE_SUPABASE_ANON_KEY || ""}
+          firebaseConfig={{
+            apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
+            projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
+          }}
           environment={import.meta.env.MODE}
-          supabaseStatus={supabaseStatus}
+          firebaseStatus={firebaseStatus}
           error={loadError}
         />
       )}

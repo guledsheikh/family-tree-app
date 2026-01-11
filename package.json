@@ -23,6 +23,12 @@
   "preview": "vite preview"
   
   },
+
+  {
+  "dependencies": {
+    "firebase": "^10.7.0"
+  }
+}
   
   "dependencies": {
   
@@ -33,7 +39,7 @@
   "d3": "^7.9.0",
   
     
-  "firebase": "^12.3.0",
+  "firebase": "^12.7.0",
   
     
   "react": "^19.1.1",

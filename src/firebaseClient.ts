@@ -13,6 +13,8 @@ import {
   Timestamp 
 } from 'firebase/firestore';
 
+import { getAuth } from 'firebase/auth';
+
 // Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -36,6 +38,7 @@ export interface FirebasePersonDoc {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+export const auth = getAuth(app);
 
 // Initialize Cloud Firestore
 export const db = getFirestore(app);

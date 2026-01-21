@@ -232,8 +232,12 @@ const deleteNodeAndChildren = async (nodeId: string) => {
   }
 };
 
+type FamilyTreeProps = {
+  isAdmin: boolean;
+};
+
 // ----- Component -----
-const FamilyTree: React.FC = () => {
+const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
   const [data, setData] = useState<Person>(initialData);
   const [menu, setMenu] = useState<{
     x: number;
@@ -449,6 +453,7 @@ const FamilyTree: React.FC = () => {
 
   const addChild = useCallback(
     async (id: string) => {
+      if (!isAdmin) return;
       const name = prompt("Enter child's name:");
       if (!name) return;
 
@@ -492,6 +497,7 @@ const FamilyTree: React.FC = () => {
 
   const editNode = useCallback(
     async (id: string) => {
+      if (!isAdmin) return;
       const name = prompt("Enter new name:");
       if (!name) return;
 
@@ -520,6 +526,7 @@ const FamilyTree: React.FC = () => {
 
   const deleteNode = useCallback(
     async (id: string) => {
+      if (!isAdmin) return;
       // Store the current data for potential revert
       const previousData = data;
 
@@ -570,6 +577,7 @@ const FamilyTree: React.FC = () => {
 
   const addParentAbove = useCallback(
     async (id: string) => {
+      if (!isAdmin) return;
       const name = prompt("Enter parent's name:");
       if (!name) return;
 
@@ -721,6 +729,7 @@ const FamilyTree: React.FC = () => {
       .on(
         "contextmenu",
         (event: MouseEvent, d: d3.HierarchyPointNode<Person>) => {
+          if (!isAdmin) return;
           event.preventDefault();
           setMenu({ x: event.clientX, y: event.clientY, nodeId: d.data.id });
         }
@@ -1106,7 +1115,7 @@ const FamilyTree: React.FC = () => {
 
       <svg ref={svgRef} width="100%" height="100%" />
 
-      {menu && (
+      {menu && isAdmin && (
         <ul
           ref={contextMenuRef}
           style={{

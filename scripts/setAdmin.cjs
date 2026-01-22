@@ -5,10 +5,12 @@ admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-const uid = "k6yqTUK7iGPdQ0bGWRrnTzUTiTO2";
+const uid = "1Vg338Rh5GSWt3bXW0ssjkayf3g2";
 
 async function makeAdmin() {
- await admin.auth().setCustomUserClaims(uid, {});
+ await admin.auth().setCustomUserClaims(uid, {
+  admin: true,
+});
 
   console.log("✅ Admin claim set successfully");
   process.exit(0);

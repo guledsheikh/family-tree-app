@@ -11,12 +11,23 @@ import "./App.css";
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
+
+      if (u) {
+        const token = await u.getIdTokenResult();
+        console.log("ADMIN CLAIM:", token.claims.admin);
+        setIsAdmin(!!token.claims.admin);
+      } else {
+        setIsAdmin(false);
+      }
+
       setLoading(false);
     });
+
     return unsubscribe;
   }, []);
 
@@ -34,7 +45,7 @@ function App() {
 
   return (
     <div className="App">
-      <FamilyTree />
+      <FamilyTree isAdmin={isAdmin} />
     </div>
   );
 }

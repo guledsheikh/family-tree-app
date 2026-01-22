@@ -1051,7 +1051,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
           </button>
         )}
 
-        <button
+        {/* <button
           onClick={resetTree}
           style={{
             padding: "8px 12px",
@@ -1066,7 +1066,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
           }}
         >
           Reset Tree Data
-        </button>
+        </button> */}
       </div>
 
       {/* Breadcrumb navigation */}

@@ -3,6 +3,19 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import * as d3 from "d3";
 import { firebase, type FirebasePersonDoc } from "./firebaseClient";
 
+const getNodesBoundingBox = (nodes: d3.HierarchyNode<TreeNodeData>[]) => {
+  // Filter out any undefined x or y values just in case
+  const xs = nodes.map((n) => n.x).filter((x): x is number => x !== undefined);
+  const ys = nodes.map((n) => n.y).filter((y): y is number => y !== undefined);
+
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+  };
+};
+
 /// ----- Types -----
 export interface Person {
   id: string;
@@ -11,6 +24,11 @@ export interface Person {
   _collapsed?: boolean;
 }
 
+interface TreeNodeData {
+  id: string | number;
+  _collapsed?: boolean;
+  children?: TreeNodeData[];
+}
 // ----- Debug Component -----
 interface DebugInfoProps {
   firebaseConfig: {
@@ -54,8 +72,8 @@ const DebugInfo: React.FC<DebugInfoProps> = ({
               firebaseStatus === "connected"
                 ? "#4caf50"
                 : firebaseStatus === "error"
-                ? "#e74c3c"
-                : "#f39c12",
+                  ? "#e74c3c"
+                  : "#f39c12",
           }}
         >
           {firebaseStatus}
@@ -117,7 +135,7 @@ const mapTree = (p: Person, fn: (n: Person) => Person): Person => {
 
 const updateTree = (
   p: Person,
-  fn: (n: Person) => Person | null
+  fn: (n: Person) => Person | null,
 ): Person | null => {
   const res = fn(p);
   if (!res) return null;
@@ -156,7 +174,7 @@ const getPathToNode = (node: Person, id: string): Person[] => {
 // Convert tree structure to flat array for Firebase
 const flattenTree = (
   node: Person,
-  parentId: string | null = null
+  parentId: string | null = null,
 ): FirebasePersonDoc[] => {
   const flattened: FirebasePersonDoc[] = [
     {
@@ -234,10 +252,11 @@ const deleteNodeAndChildren = async (nodeId: string) => {
 
 type FamilyTreeProps = {
   isAdmin: boolean;
+  onSignOut?: () => void;
 };
 
 // ----- Component -----
-const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
+const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin, onSignOut }) => {
   const [data, setData] = useState<Person>(initialData);
   const [menu, setMenu] = useState<{
     x: number;
@@ -256,6 +275,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
   const contextMenuRef = useRef<HTMLUListElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fitTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Debug keyboard shortcut
   useEffect(() => {
@@ -278,7 +298,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
       if (!firebaseApiKey || !firebaseProjectId) {
         setFirebaseStatus("error");
         setLoadError(
-          "Firebase environment variables are not configured. Please check your .env file and Vercel settings."
+          "Firebase environment variables are not configured. Please check your .env file and Vercel settings.",
         );
         setLoading(false);
         return false;
@@ -327,7 +347,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
       console.error("Error loading data:", error);
       setFirebaseStatus("error");
       setLoadError(
-        error instanceof Error ? error.message : "Unknown error occurred"
+        error instanceof Error ? error.message : "Unknown error occurred",
       );
     } finally {
       setLoading(false);
@@ -357,7 +377,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
     } catch (error) {
       console.error("Error initializing data:", error);
       setLoadError(
-        error instanceof Error ? error.message : "Unknown error occurred"
+        error instanceof Error ? error.message : "Unknown error occurred",
       );
     }
   }, [loadDataFromFirebase]);
@@ -436,6 +456,15 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
     };
   }, []);
 
+  // Clean up fit timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (fitTimeoutRef.current) {
+        clearTimeout(fitTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Get current view root node
   const viewRoot = findNode(data, viewRootId) || initialData;
 
@@ -446,8 +475,8 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
   const toggleCollapse = useCallback((id: string) => {
     setData((prev) =>
       mapTree(prev, (n) =>
-        n.id === id ? { ...n, _collapsed: !(n._collapsed ?? false) } : n
-      )
+        n.id === id ? { ...n, _collapsed: !(n._collapsed ?? false) } : n,
+      ),
     );
   }, []);
 
@@ -461,7 +490,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
 
       // Create updated data first
       const updatedData = mapTree(data, (n) =>
-        n.id === id ? { ...n, children: [...(n.children ?? []), child] } : n
+        n.id === id ? { ...n, children: [...(n.children ?? []), child] } : n,
       );
 
       // Update state immediately for UI responsiveness
@@ -492,7 +521,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
 
       setMenu(null);
     },
-    [data]
+    [data],
   );
 
   const editNode = useCallback(
@@ -503,7 +532,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
 
       // Create updated data first
       const updatedData = mapTree(data, (n) =>
-        n.id === id ? { ...n, name } : n
+        n.id === id ? { ...n, name } : n,
       );
 
       // Update state immediately for UI responsiveness
@@ -521,7 +550,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
 
       setMenu(null);
     },
-    [data]
+    [data],
   );
 
   const deleteNode = useCallback(
@@ -551,14 +580,14 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
         const allNodes = await firebase.getAll();
         const nodesWithChild = allNodes.filter(
           (
-            node: FirebasePersonDoc // Change here
-          ) => node.children && node.children.includes(id)
+            node: FirebasePersonDoc, // Change here
+          ) => node.children && node.children.includes(id),
         );
 
         // Update each node to remove the deleted node from its children array
         for (const node of nodesWithChild) {
           const updatedChildren = node.children.filter(
-            (childId: string) => childId !== id
+            (childId: string) => childId !== id,
           );
 
           await firebase.update(node.id, { children: updatedChildren });
@@ -572,7 +601,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
 
       setMenu(null);
     },
-    [data]
+    [data],
   );
 
   const addParentAbove = useCallback(
@@ -620,7 +649,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
 
       setMenu(null);
     },
-    [data]
+    [data],
   );
 
   const setViewToNode = useCallback((id: string) => {
@@ -631,23 +660,222 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
   const resetView = useCallback(() => {
     if (!svgRef.current || !zoomRef.current) return;
 
-    const svg = d3.select(svgRef.current);
+    const svg = d3.select(svgRef.current as SVGSVGElement);
     svg
       .transition()
       .duration(750)
       .call(zoomRef.current.transform, d3.zoomIdentity);
   }, []);
 
-  // Reset tree to initial data
-  const resetTree = useCallback(async () => {
-    if (
-      window.confirm(
-        "Are you sure you want to reset the tree? This will restore the original sample data."
-      )
-    ) {
-      await initializeFirebaseData();
+  const centerOnNode = useCallback((nodeId: string) => {
+    if (!svgRef.current || !zoomRef.current) return;
+
+    requestAnimationFrame(() => {
+      const svg = d3.select(svgRef.current as SVGSVGElement);
+
+      const nodeEl = svg
+        .selectAll<SVGGElement, d3.HierarchyPointNode<Person>>("g.node")
+        .filter((d) => d.data.id === nodeId);
+
+      if (nodeEl.empty()) return;
+
+      const d = nodeEl.datum();
+
+      const width = svgRef.current!.clientWidth;
+      const height = svgRef.current!.clientHeight;
+
+      const scale = 1;
+
+      const x = -d.x * scale + width / 2;
+      const y = -d.y * scale + height / 2;
+
+      const t = svg.transition().duration(600);
+
+      zoomRef.current!.transform(
+        t as unknown as d3.Selection<SVGSVGElement, unknown, null, undefined>,
+        d3.zoomIdentity.translate(x, y).scale(scale),
+      );
+    });
+  }, []);
+
+  const fitSubtree = useCallback(
+    (nodeId: string) => {
+      if (!svgRef.current || !zoomRef.current) return;
+
+      requestAnimationFrame(() => {
+        const svg = d3.select(svgRef.current as SVGSVGElement);
+        const g = svg.select<SVGGElement>("g");
+
+        if (g.empty()) return;
+
+        const expandedNode = g
+          .selectAll<SVGGElement, d3.HierarchyPointNode<Person>>("g.node")
+          .filter((d) => d.data.id === nodeId);
+
+        if (expandedNode.empty()) return;
+
+        const d = expandedNode.datum();
+        const nodeX = d.x;
+        const nodeY = d.y;
+
+        const subtreeNodes = g
+          .selectAll<SVGGElement, d3.HierarchyPointNode<Person>>("g.node")
+          .filter((nodeData) => {
+            const path = getPathToNode(viewRoot, nodeData.data.id);
+            return path.some((p) => p.id === nodeId);
+          });
+
+        if (subtreeNodes.empty()) return;
+
+        let minX = Infinity,
+          minY = Infinity,
+          maxX = -Infinity,
+          maxY = -Infinity;
+
+        subtreeNodes.each(function () {
+          const transform = d3.select(this).attr("transform");
+          if (!transform) return;
+
+          const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+          if (match) {
+            const x = parseFloat(match[1]);
+            const y = parseFloat(match[2]);
+
+            const nodeW = 140;
+            const nodeH = 56;
+
+            minX = Math.min(minX, x - nodeW / 2);
+            maxX = Math.max(maxX, x + nodeW / 2);
+            minY = Math.min(minY, y - nodeH / 2);
+            maxY = Math.max(maxY, y + nodeH / 2);
+          }
+        });
+
+        const transform = expandedNode.attr("transform");
+        if (transform) {
+          const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+          if (match) {
+            const x = parseFloat(match[1]);
+            const y = parseFloat(match[2]);
+            const nodeW = 140;
+            const nodeH = 56;
+
+            minX = Math.min(minX, x - nodeW / 2);
+            maxX = Math.max(maxX, x + nodeW / 2);
+            minY = Math.min(minY, y - nodeH / 2);
+            maxY = Math.max(maxY, y + nodeH / 2);
+          }
+        }
+
+        const width = svgRef.current!.clientWidth;
+        const height = svgRef.current!.clientHeight;
+
+        const paddingX = 160;
+        const paddingY = 120;
+
+        const boundsWidth = maxX - minX + paddingX * 2;
+        const boundsHeight = maxY - minY + paddingY * 2;
+
+        const scaleX = width / boundsWidth;
+        const scaleY = height / boundsHeight;
+        let scale = Math.min(scaleX, scaleY);
+
+        scale = Math.max(0.4, Math.min(scale, 1.2));
+
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        const nodeInViewX = nodeX * scale;
+        const nodeInViewY = nodeY * scale;
+
+        let translateX = centerX - nodeInViewX;
+        let translateY = centerY - nodeInViewY;
+
+        const subtreeBoundsInView = {
+          minX: minX * scale + translateX,
+          maxX: maxX * scale + translateX,
+          minY: minY * scale + translateY,
+          maxY: maxY * scale + translateY,
+        };
+
+        if (subtreeBoundsInView.minX < 0) {
+          translateX -= subtreeBoundsInView.minX;
+        }
+        if (subtreeBoundsInView.maxX > width) {
+          translateX -= subtreeBoundsInView.maxX - width;
+        }
+        if (subtreeBoundsInView.minY < 0) {
+          translateY -= subtreeBoundsInView.minY;
+        }
+        if (subtreeBoundsInView.maxY > height) {
+          translateY -= subtreeBoundsInView.maxY - height;
+        }
+
+        svg
+          .transition()
+          .duration(600)
+          .call(
+            zoomRef.current!.transform as any,
+            d3.zoomIdentity.translate(translateX, translateY).scale(scale),
+          );
+      });
+    },
+    [viewRoot],
+  );
+
+  function getSubtreeIds(root: any, targetId: string): string[] {
+    const ids: string[] = [];
+
+    function collect(node: any) {
+      ids.push(node.id);
+      node.children?.forEach(collect);
     }
-  }, [initializeFirebaseData]);
+
+    function find(node: any): boolean {
+      if (node.id === targetId) {
+        collect(node);
+        return true;
+      }
+      return node.children?.some(find) ?? false;
+    }
+
+    find(root);
+    return ids;
+  }
+
+  const panToNode = useCallback((nodeId: string) => {
+    if (!svgRef.current || !zoomRef.current) return;
+
+    requestAnimationFrame(() => {
+      const svg = d3.select(svgRef.current as SVGSVGElement);
+
+      const nodeEl = svg
+        .selectAll<SVGGElement, d3.HierarchyPointNode<Person>>("g.node")
+        .filter((d) => d.data.id === nodeId);
+
+      if (nodeEl.empty()) return;
+
+      const d = nodeEl.datum();
+
+      const width = svgRef.current!.clientWidth;
+      const height = svgRef.current!.clientHeight;
+
+      // Get current zoom transform to keep the same scale
+      const currentTransform = d3.zoomTransform(svg.node() as Element);
+      const currentScale = currentTransform.k;
+
+      // Center on the node at current scale
+      const x = -d.x * currentScale + width / 2;
+      const y = -d.y * currentScale + height / 2;
+
+      const t = svg.transition().duration(400);
+
+      zoomRef.current!.transform(
+        t as unknown as d3.Selection<SVGSVGElement, unknown, null, undefined>,
+        d3.zoomIdentity.translate(x, y).scale(currentScale),
+      );
+    });
+  }, []);
 
   // D3 render (unchanged from your original code)
   useEffect(() => {
@@ -667,7 +895,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
       .style("background", "#f8fafc");
 
     const root = d3.hierarchy<Person>(viewRoot, (d) =>
-      d._collapsed ? null : d.children
+      d._collapsed ? null : d.children,
     );
     const tree = d3.tree<Person>().nodeSize([160, 120]);
     const rootNode = tree(root);
@@ -721,7 +949,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
       .attr("class", "node")
       .attr(
         "transform",
-        (d: d3.HierarchyPointNode<Person>) => `translate(${d.x},${d.y})`
+        (d: d3.HierarchyPointNode<Person>) => `translate(${d.x},${d.y})`,
       )
       .on("click", (_, d: d3.HierarchyPointNode<Person>) => {
         setSelectedNode(d.data.id);
@@ -732,7 +960,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
           if (!isAdmin) return;
           event.preventDefault();
           setMenu({ x: event.clientX, y: event.clientY, nodeId: d.data.id });
-        }
+        },
       )
       .style("cursor", "pointer");
 
@@ -749,13 +977,13 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
       .attr("rx", 10)
       .attr("ry", 10)
       .attr("fill", (d: d3.HierarchyPointNode<Person>) =>
-        d.data.id === selectedNode ? "#BBDEFB" : "#E3F2FD"
+        d.data.id === selectedNode ? "#BBDEFB" : "#E3F2FD",
       )
       .attr("stroke", (d: d3.HierarchyPointNode<Person>) =>
-        d.data.id === selectedNode ? "#0D47A1" : "#1565C0"
+        d.data.id === selectedNode ? "#0D47A1" : "#1565C0",
       )
       .attr("stroke-width", (d: d3.HierarchyPointNode<Person>) =>
-        d.data.id === selectedNode ? 3 : 2
+        d.data.id === selectedNode ? 3 : 2,
       );
 
     // Node text
@@ -772,7 +1000,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
         .attr("fill", "#0f172a")
         .style(
           "font-family",
-          "system-ui, -apple-system, Segoe UI, Roboto, Arial"
+          "system-ui, -apple-system, Segoe UI, Roboto, Arial",
         )
         .style("font-size", "14px")
         .style("font-weight", "600")
@@ -822,8 +1050,26 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
       .append("g")
       .attr("transform", `translate(0, ${nodeH / 2 + 15})`)
       .style("cursor", "pointer")
-      .on("click", (_, d: d3.HierarchyPointNode<Person>) => {
+      .on("click", (_, d) => {
+        const wasCollapsed = d.data._collapsed;
+
+        if (fitTimeoutRef.current) {
+          clearTimeout(fitTimeoutRef.current);
+        }
+
         toggleCollapse(d.data.id);
+
+        if (wasCollapsed) {
+          // Expanding: fit the subtree
+          fitTimeoutRef.current = setTimeout(() => {
+            fitSubtree(d.data.id);
+          }, 50);
+        } else {
+          // Collapsing: just center on the node without changing scale
+          fitTimeoutRef.current = setTimeout(() => {
+            panToNode(d.data.id);
+          }, 50);
+        }
       });
 
     toggler
@@ -841,7 +1087,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
       .style("font-size", "12px")
       .style("font-weight", "700")
       .text((d: d3.HierarchyPointNode<Person>) =>
-        d.data._collapsed ?? false ? "+" : "−"
+        (d.data._collapsed ?? false) ? "+" : "−",
       );
 
     // Add expand upward button if not at the top level
@@ -886,6 +1132,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
     viewRootId,
     setViewToNode,
     loading,
+    panToNode,
   ]);
 
   if (loading) {
@@ -994,6 +1241,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
           display: "flex",
           gap: "10px",
           flexWrap: "wrap",
+          maxWidth: "calc(100% - 120px)",
         }}
       >
         <button
@@ -1050,68 +1298,46 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin }) => {
             Show Full Tree
           </button>
         )}
+      </div>
 
-        {/* <button
-          onClick={resetTree}
+      {/* SIGN OUT BUTTON - Add this block */}
+      {onSignOut && (
+        <button
+          onClick={() => {
+            if (window.confirm("Are you sure you want to sign out?")) {
+              onSignOut();
+            }
+          }}
           style={{
-            padding: "8px 12px",
-            background: "#ff9800",
+            position: "absolute",
+            top: 10,
+            right: 10,
+            zIndex: 100, // Higher z-index to ensure it's on top
+            padding: "8px 16px",
+            background: "#dc2626",
             color: "white",
             border: "none",
-            borderRadius: "4px",
+            borderRadius: "6px",
             cursor: "pointer",
             fontFamily: "system-ui",
             fontSize: "14px",
-            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+            fontWeight: "600",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#b91c1c";
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#dc2626";
+            e.currentTarget.style.transform = "scale(1)";
           }}
         >
-          Reset Tree Data
-        </button> */}
-      </div>
-
-      {/* Breadcrumb navigation */}
-      {ancestorPath.length > 1 && (
-        <div
-          style={{
-            position: "absolute",
-            top: 60,
-            left: 10,
-            zIndex: 10,
-            display: "flex",
-            alignItems: "center",
-            background: "rgba(255, 255, 255, 0.9)",
-            padding: "8px 12px",
-            borderRadius: "4px",
-            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-          }}
-        >
-          <span style={{ marginRight: "8px", color: "#64748b" }}>
-            Ancestors:
-          </span>
-          {ancestorPath.slice(0, -1).map((person, index) => (
-            <React.Fragment key={person.id}>
-              <button
-                onClick={() => setViewToNode(person.id)}
-                style={{
-                  padding: "4px 8px",
-                  background: "transparent",
-                  color: "#1565C0",
-                  border: "none",
-                  cursor: "pointer",
-                  fontFamily: "system-ui",
-                  fontSize: "14px",
-                  textDecoration: "underline",
-                }}
-              >
-                {person.name}
-              </button>
-              {index < ancestorPath.length - 2 && (
-                <span style={{ margin: "0 4px", color: "#64748b" }}>→</span>
-              )}
-            </React.Fragment>
-          ))}
-        </div>
+          Sign Out
+        </button>
       )}
+      {/* END OF SIGN OUT BUTTON */}
 
       <svg ref={svgRef} width="100%" height="100%" />
 

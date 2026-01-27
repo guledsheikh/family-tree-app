@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import type { User } from "firebase/auth";
 import { auth } from "./firebaseClient";
 
@@ -31,6 +31,16 @@ function App() {
     return unsubscribe;
   }, []);
 
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      // The onAuthStateChanged listener will automatically update the user state
+      console.log("User signed out successfully");
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
+  };
+
   if (loading) {
     return <div className="App">Loading...</div>;
   }
@@ -45,7 +55,7 @@ function App() {
 
   return (
     <div className="App">
-      <FamilyTree isAdmin={isAdmin} />
+      <FamilyTree isAdmin={isAdmin} onSignOut={handleSignOut} />
     </div>
   );
 }

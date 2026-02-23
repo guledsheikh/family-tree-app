@@ -91,18 +91,22 @@ const DebugInfo: React.FC<DebugInfoProps> = ({
 const initialData: Person = {
   id: "1",
   name: "Great-Great-Grandparent",
+  _collapsed: true,
   children: [
     {
       id: "2",
       name: "Great-Grandparent",
+      _collapsed: true,
       children: [
         {
           id: "3",
           name: "Grandparent",
+          _collapsed: true,
           children: [
             {
               id: "4",
               name: "Parent 1",
+              _collapsed: true,
               children: [
                 { id: "5", name: "Child 1.1" },
                 { id: "6", name: "Child 1.2" },
@@ -111,6 +115,7 @@ const initialData: Person = {
             {
               id: "7",
               name: "Parent 2",
+              _collapsed: true,
               children: [{ id: "8", name: "Child 2.1" }],
             },
           ],
@@ -182,7 +187,8 @@ const flattenTree = (
       name: node.name,
       parent_id: parentId,
       children: node.children ? node.children.map((child) => child.id) : [],
-      collapsed: node._collapsed || false,
+      // collapsed: node._collapsed || false,
+      collapsed: false, // Never save UI collapsed state to Firebase
     },
   ];
 
@@ -207,7 +213,8 @@ const buildTree = (flatData: FirebasePersonDoc[]): Person | null => {
     nodeMap.set(item.id, {
       id: item.id,
       name: item.name,
-      _collapsed: item.collapsed || false,
+      //_collapsed: item.collapsed || false,
+      _collapsed: true, // Always start with all nodes expanded
       children: [],
     });
   });
@@ -1241,7 +1248,7 @@ const FamilyTree: React.FC<FamilyTreeProps> = ({ isAdmin, onSignOut }) => {
           display: "flex",
           gap: "10px",
           flexWrap: "wrap",
-          maxWidth: "calc(100% - 120px)",
+          maxWidth: "calc(100% - 150px)",
         }}
       >
         <button
